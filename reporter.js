@@ -1,108 +1,157 @@
-const mongoose = require("mongoose");
-const validator = require("validator");
-const bcrypt = require("bcryptjs");
-const jwt = require('jsonwebtoken')
+const express = require("express");
+const Reporter = require("../models/reporter");
+const auth = require('../middlware/auth')
+
+const router = new express.Router();
 
 
 
-const userScehma = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-
-    age: {
-        type: Number,
-        default: 20,
-    },
-    address: {
-        type: String,
-        required: true,
-        trim: true,
-    },
-    email: {
-        type: String,
-        lowercase: true,
-        required: true,
-        unique: true,
-        validate(value) {
-            if (!validator.isEmail(value)) {
-                throw new Error("Email is invalid");
-            }
-        },
-    },
-
-    password: {
-        type: String,
-        required: true,
-        trim: true,
-        lowercase: true,
-        minLength: 6,
-        validate(value) {
-            if (value.toLowerCase().includes("password")) {
-                throw new Error("Password can't contain password word");
-            }
-        },
-    },
-
-    tokens: [{
-        token: {
-            type: String,
-            required: true
-        }
-    }]
+router.post("/reporters", async(req, res) => {
+    const user = new Reporter(req.body);
+    try {
+        await user.save()
+        const token = await user.generateToken()
+        res.status(200).send({ user, token })
+    } catch (e) {
+        res.status(400).send(e)
+    }
 });
 
 
 
-userScehma.virtual('userTasks', {
-    ref: 'Task',
-    localField: '_id',
-    foreignField: 'owner'
+router.get("/reporters", auth, (req, res) => {
+    Reporter.find({})
+        .then((users) => {
+            res.status(200).send(users);
+        })
+        .catch((e) => {
+            res.status(500).send(e);
+        });
+});
+
+
+
+router.get("/reporters/:id", auth, (req, res) => {
+    const _id = req.params.id;
+    Reporter.findById(_id)
+        .then((user) => {
+            if (!user) {
+                return res.status(400).send("Unable to find user");
+            }
+            res.status(200).send(user);
+        })
+        .catch((e) => {
+            res.status(500).send("Unable to connect to database");
+        });
+});
+
+
+
+router.patch('/reporters/:id', async(req, res) => {
+    const _id = req.params.id
+    try {
+        const user = await User.findByIdAndUpdate(_id, req.body, {
+            new: true,
+            runValidators: true
+        })
+        if (!user) {
+            return res.status(400).send('No user is found')
+        }
+        res.status(200).send(user)
+    } catch (e) {
+        res.status(400).send(e)
+    }
 })
 
 
 
-userScehma.pre("save", async function(next) {
-    const user = this;
-    if (user.isModified("password")) {
-        user.password = await bcrypt.hash(user.password, 8);
+router.patch("/reporters/:id", auth, async(req, res) => {
+    const updates = Object.keys(req.body);
+    console.log(updates);
+
+    const allowedUpdates = ["name", "password"];
+    var isValid = updates.every((el) => allowedUpdates.includes(el));
+    console.log(isValid);
+
+    if (!isValid) {
+        return res.status(400).send("Sorry cannot update");
     }
-    next();
+    const _id = req.params.id;
+    try {
+        const user = await Reporter.findById(_id)
+        updates.forEach((el) => (user[el] = req.body[el]))
+        await user.save()
+        console.log(user)
+        if (!user) {
+            return res.send('No user is found')
+        }
+        res.status(200).send(user)
+    } catch (e) {
+        res.status(400).send(e)
+    }
 });
 
 
 
-userScehma.statics.findByCredentials = async(email, password) => {
+router.delete('/reporters/:id', auth, async(req, res) => {
+    const _id = req.params.id
+    try {
+        const user = await Reporter.findByIdAndDelete(_id)
+        if (!user) {
+            return res.status(400).send('No user is found')
+        }
+        res.status(200).send(user)
+    } catch (e) {
+        res.status(400).send(e)
+    }
+})
 
-    const user = await User.findOne({ email });
 
-    if (!user) {
-        throw new Error("Unable to login");
+
+router.post('/reporters/login', async(req, res) => {
+    try {
+        const user = await Reporter.findByCredentials(req.body.email, req.body.password)
+        const token = await user.generateToken()
+        res.send({ user, token })
+    } catch (e) {
+        res.status(400).send('Try again ' + e)
+    }
+})
+
+
+
+router.get('/profile', auth, async(req, res) => {
+    res.send(req.user)
+})
+
+
+
+
+router.delete('/logout', auth, async(req, res) => {
+    try {
+        req.user.tokens = req.user.tokens.filter((el) => {
+            return el.token !== req.token
+        })
+
+        await req.user.save()
+        res.send()
+    } catch (e) {
+        res.status(500).send()
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+})
 
-    if (!isMatch) {
-        throw new Error("Unable to login");
+
+
+
+router.post('/logoutAll', auth, async(req, res) => {
+    try {
+        req.user.tokens = []
+        await req.user.save()
+        res.send('Logout all was done successsfully')
+    } catch (e) {
+        res.send('Please login')
     }
+})
 
-    return user;
-};
-
-
-
-
-userScehma.methods.generateToken = async function() {
-    const user = this
-    const token = jwt.sign({ _id: user._id.toString() }, 'node-course')
-
-    user.tokens = user.tokens.concat({ token: token })
-    await user.save()
-
-    return token
-}
-
-const User = mongoose.model("User", userScehma);
-module.exports = User;
+module.exports = router;
