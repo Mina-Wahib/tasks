@@ -1,0 +1,18 @@
+<html>
+<head>
+    <title>Welcome node</title>
+   <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    {{>header}}
+
+    {{#each newsData}}
+    {{>news hamada=.}}
+    {{/each}}
+ 
+   
+
+    {{>footer}}
+    <script src='js/app.js'></script>
+</body>
+</html>
